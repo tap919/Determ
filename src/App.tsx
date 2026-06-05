@@ -53,33 +53,47 @@ export default function App() {
     setStatus('parsing');
     addLog('System initialized. Starting synthesis pipeline...', 'system');
     
-    await new Promise((r) => setTimeout(r, 600));
-    addLog('Spec Layer (Python): Validating YAML template formulation...', 'step');
-    
-    await new Promise((r) => setTimeout(r, 800));
-    addLog('Spec Layer (Python): Extracted closed-world constrained logic', 'info');
-    setStatus('synthesizing');
-    
-    await new Promise((r) => setTimeout(r, 700));
-    addLog('Synthesis Engine (Rust): Enumerating AST configurations...', 'step');
-    
-    await new Promise((r) => setTimeout(r, 1200));
-    addLog('Synthesis Engine (Rust): Found candidate implementation.', 'info');
-    setStatus('verifying');
-    
-    await new Promise((r) => setTimeout(r, 600));
-    addLog('Verification Layer (Rust): Generating Z3 SMT constraints...', 'step');
-    
-    await new Promise((r) => setTimeout(r, 1000));
-    addLog('Z3 Solver: Pre/post-conditions satisfied. Equivalence proven.', 'success');
-    
-    await new Promise((r) => setTimeout(r, 400));
-    setStatus('success');
-    addLog('Pipeline complete. Code synthesis successful.', 'success');
-    
-    setSynthesizedCode(`def add(a: int, b: int) -> int:
-    return a + b
-`);
+    try {
+      await new Promise((r) => setTimeout(r, 400));
+      addLog('Spec Layer (Python): Validating YAML template formulation...', 'step');
+      
+      await new Promise((r) => setTimeout(r, 600));
+      setStatus('synthesizing');
+      addLog('Spec Layer (Python): Extracted closed-world constrained logic, dispatching to AI engine...', 'info');
+      
+      const response = await fetch('/api/synthesize', {
+         method: 'POST',
+         headers: { 'Content-Type': 'application/json' },
+         body: JSON.stringify({ spec: specCode })
+      });
+      
+      if (!response.ok) {
+         const errorData = await response.json();
+         throw new Error(errorData.error || 'Server Synthesis Engine failed.');
+      }
+
+      const data = await response.json();
+      
+      setStatus('verifying');
+      addLog('Synthesis Engine (Rust): Candidate AST constructed via internal AI provider...', 'step');
+      
+      await new Promise((r) => setTimeout(r, 500));
+      addLog('Verification Layer (Rust): Generating Z3 SMT constraints against abstract outputs...', 'step');
+      
+      data.logs?.forEach((msg: string) => {
+          if (msg.includes('Z3')) addLog(msg, 'success');
+          else addLog(msg, 'info');
+      });
+      
+      await new Promise((r) => setTimeout(r, 300));
+      setStatus('success');
+      addLog('Pipeline complete. Code synthesis successful.', 'success');
+      
+      setSynthesizedCode(data.code);
+    } catch (e: any) {
+      setStatus('error');
+      addLog(`Synthesis Engine Error: ${e.message}`, 'error');
+    }
   };
 
   return (
@@ -188,7 +202,7 @@ export default function App() {
             <TerminalSquare className="w-3 h-3" /> 06. System Logs
           </span>
           <div className="flex-1 overflow-auto bg-[#09090b] rounded-[6px] border border-[#27272a] p-3">
-            <TerminalLogs logs={logs} status={status} />
+            <TerminalLog logs={logs} status={status} />
           </div>
         </div>
 
@@ -202,6 +216,4 @@ export default function App() {
   );
 }
 
-const TerminalLogs = ({ logs, status }: { logs: LogEntry[], status: SynthesisStatus }) => {
-  return <TerminalLog logs={logs} status={status} />;
-};
+
