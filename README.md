@@ -1,20 +1,17 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
-</div>
+# YAML to Code Synthesizer
 
-# Run and deploy your AI Studio app
+A deterministic coding agent interface that converts formal YAML specifications into working Python code, powered by Gemini 2.5 Flash SMT solver simulation.
 
-This contains everything you need to run your app locally.
+## Overview
 
-View your app in AI Studio: https://ai.studio/apps/85fc7737-c5a8-43b5-8503-300c1c7c6c61
+This project provides a clean, single-screen bento-grid dashboard where you can define Python functions using a formal YAML specification. The YAML spec is dispatched to a custom Node.js/Express server, validated, and translated into an AST to synthesize the final Python output.
 
-## Run Locally
+## Tech Stack
+- **Frontend**: React 19, Vite, Tailwind CSS v4, Framer Motion
+- **Backend**: Express, js-yaml, @google/genai
 
-**Prerequisites:**  Node.js
+## Running Locally
 
-
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+1. Create a `.env` file by copying `.env.example` and adding your Gemini API key.
+2. Run `npm run dev`
+3. Open http://localhost:3000

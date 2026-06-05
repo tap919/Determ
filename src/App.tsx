@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState } from 'react';
 import { Play, Code2, Database, TerminalSquare, RotateCcw, Cpu } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { LogEntry, SynthesisStatus } from './types';
@@ -6,10 +6,6 @@ import { generateId, getCurrentTime } from './lib/utils';
 import { SpecEditor } from './components/SpecEditor';
 import { SynthesizedCode } from './components/SynthesizedCode';
 import { TerminalLog } from './components/TerminalLog';
-import { AutonomousEngine } from './components/AutonomousEngine';
-import { BusinessCrons } from './components/BusinessCrons';
-import { SelfLearning } from './components/SelfLearning';
-import { Dreaming } from './components/Dreaming';
 
 const DEFAULT_SPEC = `# function_synthesis_template.yaml
 version: 1.0
@@ -55,11 +51,11 @@ export default function App() {
     
     try {
       await new Promise((r) => setTimeout(r, 400));
-      addLog('Spec Layer (Python): Validating YAML template formulation...', 'step');
+      addLog('Spec Layer: Validating YAML template formulation...', 'step');
       
       await new Promise((r) => setTimeout(r, 600));
       setStatus('synthesizing');
-      addLog('Spec Layer (Python): Extracted closed-world constrained logic, dispatching to AI engine...', 'info');
+      addLog('Dispatcher: Sending specification to Gemini 2.5 Flash...', 'info');
       
       const response = await fetch('/api/synthesize', {
          method: 'POST',
@@ -75,19 +71,18 @@ export default function App() {
       const data = await response.json();
       
       setStatus('verifying');
-      addLog('Synthesis Engine (Rust): Candidate AST constructed via internal AI provider...', 'step');
+      addLog('Synthesis Engine: Code synthesis completed...', 'step');
       
       await new Promise((r) => setTimeout(r, 500));
-      addLog('Verification Layer (Rust): Generating Z3 SMT constraints against abstract outputs...', 'step');
       
       data.logs?.forEach((msg: string) => {
-          if (msg.includes('Z3')) addLog(msg, 'success');
+          if (msg.includes('successfully')) addLog(msg, 'success');
           else addLog(msg, 'info');
       });
       
       await new Promise((r) => setTimeout(r, 300));
       setStatus('success');
-      addLog('Pipeline complete. Code synthesis successful.', 'success');
+      addLog('Pipeline complete. Ready for new spec.', 'success');
       
       setSynthesizedCode(data.code);
     } catch (e: any) {
@@ -105,8 +100,8 @@ export default function App() {
             <Cpu className="w-4 h-4" />
           </div>
           <div>
-            <h1 className="font-bold text-xl text-[#fafafa] tracking-tight flex items-center gap-2">Deterministic Coding Agent</h1>
-            <p className="text-xs text-zinc-500 font-mono mt-1">Autonomous Loops • Deterministic Execution • Business Ops</p>
+            <h1 className="font-bold text-xl text-[#fafafa] tracking-tight flex items-center gap-2">YAML to Code Synthesizer</h1>
+            <p className="text-xs text-zinc-500 font-mono mt-1">Powered by Gemini 2.5 Flash</p>
           </div>
         </div>
         
@@ -116,8 +111,6 @@ export default function App() {
               <span className={`h-2 w-2 rounded-full ${status === 'idle' || status === 'success' ? 'bg-[#22c55e] shadow-[0_0_8px_#22c55e]' : 'bg-[#f97316] shadow-[0_0_8px_#f97316]'}`}></span>
               ENGINE ACTIVE
             </div>
-            <div className="text-zinc-500">NODES: 1,402</div>
-            <div className="text-zinc-500">SOLVER: Z3/CVC5</div>
           </div>
           
           <button
@@ -136,9 +129,9 @@ export default function App() {
       </header>
 
       {/* Main Workspace - 12x12 Bento Grid */}
-      <main className="flex-1 grid grid-cols-12 grid-rows-12 gap-4 h-0 overflow-hidden">
-        {/* Left Column Top: Spec Editor */}
-        <div className="col-span-3 row-span-6 bg-[#18181b] border border-[#3f3f46] rounded-xl p-4 flex flex-col relative overflow-hidden">
+      <main className="flex-1 grid grid-cols-12 grid-rows-1 gap-4 h-0 overflow-hidden">
+        {/* Left Column: Spec Editor */}
+        <div className="col-span-6 bg-[#18181b] border border-[#3f3f46] rounded-xl p-4 flex flex-col relative overflow-hidden">
           <span className="text-[10px] uppercase tracking-[0.1em] text-[#f97316] mb-3 font-semibold flex items-center gap-2 shrink-0">
             <Code2 className="w-3 h-3" /> 01. Spec Layer (YAML)
           </span>
@@ -147,73 +140,54 @@ export default function App() {
           </div>
         </div>
 
-        {/* Left Column Bottom: Synthesized Code */}
-        <div className="col-span-3 row-span-6 bg-[#18181b] border border-[#3f3f46] rounded-xl p-4 flex flex-col relative overflow-hidden">
-          <span className="text-[10px] uppercase tracking-[0.1em] text-[#f97316] mb-3 font-semibold flex items-center gap-2 shrink-0">
-            <Database className="w-3 h-3" /> 02. Synthesis Output
-          </span>
-          <div className="flex-1 relative overflow-hidden">
-            <AnimatePresence mode="wait">
-              {synthesizedCode ? (
-                <motion.div
-                  key="code"
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0 }}
-                  className="h-full overflow-auto"
-                >
-                  <SynthesizedCode code={synthesizedCode} />
-                </motion.div>
-              ) : (
-                <motion.div 
-                  key="placeholder"
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  className="absolute inset-0 flex flex-col items-center justify-center text-zinc-600 font-mono text-xs select-none bg-[#09090b] rounded-md border border-[#27272a]"
-                >
-                  <Database className="w-8 h-8 mb-4 text-[#27272a]" />
-                  <p>Awaiting AST synthesis...</p>
-                  <p className="text-[10px] text-zinc-700 mt-2 uppercase tracking-widest px-8 text-center leading-relaxed">Execute Pipeline to run</p>
-                </motion.div>
-              )}
-            </AnimatePresence>
+        {/* Right Column (Split) */}
+        <div className="col-span-6 flex flex-col gap-4 overflow-hidden">
+          {/* Right Column Top: Synthesized Code */}
+          <div className="flex-1 bg-[#18181b] border border-[#3f3f46] rounded-xl p-4 flex flex-col relative overflow-hidden">
+            <span className="text-[10px] uppercase tracking-[0.1em] text-[#f97316] mb-3 font-semibold flex items-center gap-2 shrink-0">
+              <Database className="w-3 h-3" /> 02. Synthesis Output
+            </span>
+            <div className="flex-1 relative overflow-hidden">
+              <AnimatePresence mode="wait">
+                {synthesizedCode ? (
+                  <motion.div
+                    key="code"
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0 }}
+                    className="h-full overflow-auto"
+                  >
+                    <SynthesizedCode code={synthesizedCode} />
+                  </motion.div>
+                ) : (
+                  <motion.div 
+                    key="placeholder"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    className="absolute inset-0 flex flex-col items-center justify-center text-zinc-600 font-mono text-xs select-none bg-[#09090b] rounded-md border border-[#27272a]"
+                  >
+                    <Database className="w-8 h-8 mb-4 text-[#27272a]" />
+                    <p>Awaiting AST synthesis...</p>
+                    <p className="text-[10px] text-zinc-700 mt-2 uppercase tracking-widest px-8 text-center leading-relaxed">Execute Pipeline to run</p>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
           </div>
-        </div>
 
-        {/* Middle-Left Column Top: Autonomous Engine */}
-        <div className="col-span-3 row-span-5 bg-[#18181b] border border-[#3f3f46] rounded-xl p-4 flex flex-col relative overflow-hidden">
-          <AutonomousEngine />
-        </div>
-
-        {/* Middle-Left Column Bottom: Self-Learning */}
-        <div className="col-span-3 row-span-7 bg-[#18181b] border border-[#3f3f46] rounded-xl p-4 flex flex-col relative overflow-hidden">
-          <SelfLearning />
-        </div>
-
-        {/* Middle-Right Column Top: Dreaming */}
-        <div className="col-span-3 row-span-7 bg-[#18181b] border border-[#3f3f46] rounded-xl p-4 flex flex-col relative overflow-hidden">
-          <Dreaming />
-        </div>
-
-        {/* Middle-Right Column Bottom: Terminal */}
-        <div className="col-span-3 row-span-5 bg-[#18181b] border border-[#3f3f46] rounded-xl p-4 flex flex-col relative overflow-hidden">
-          <span className="text-[10px] uppercase tracking-[0.1em] text-[#f97316] mb-3 font-semibold flex items-center gap-2 shrink-0">
-            <TerminalSquare className="w-3 h-3" /> 06. System Logs
-          </span>
-          <div className="flex-1 overflow-auto bg-[#09090b] rounded-[6px] border border-[#27272a] p-3">
-            <TerminalLog logs={logs} status={status} />
+          {/* Right Column Bottom: Terminal */}
+          <div className="h-1/3 min-h-[150px] shrink-0 bg-[#18181b] border border-[#3f3f46] rounded-xl p-4 flex flex-col relative overflow-hidden">
+            <span className="text-[10px] uppercase tracking-[0.1em] text-[#f97316] mb-3 font-semibold flex items-center gap-2 shrink-0">
+              <TerminalSquare className="w-3 h-3" /> 03. System Logs
+            </span>
+            <div className="flex-1 overflow-auto bg-[#09090b] rounded-[6px] border border-[#27272a] p-3">
+              <TerminalLog logs={logs} status={status} />
+            </div>
           </div>
-        </div>
-
-        {/* Right Column: Business Crons */}
-        <div className="col-span-3 row-span-12 bg-[#18181b] border border-[#3f3f46] rounded-xl p-4 flex flex-col relative overflow-hidden">
-          <BusinessCrons />
         </div>
 
       </main>
     </div>
   );
 }
-
-
