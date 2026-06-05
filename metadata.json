@@ -1,0 +1,8 @@
+{
+  "name": "Deterministic Agent UI",
+  "description": "Dashboard and simulator for the Python/Rust Deterministic Coding Agent architecture.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
