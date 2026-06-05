@@ -18,9 +18,7 @@ app.post("/api/synthesize", async (req, res) => {
       return res.status(400).json({ error: "No specification provided." });
     }
 
-    // Only attempt to call Gemini if API Key exists
     if (!process.env.GEMINI_API_KEY) {
-      // Fallback for development/testing without real API key
       return res.json({
         code: `function generatedFunction() {\n  return "Fallback mode - missing API key";\n}`,
         logs: [
@@ -30,10 +28,11 @@ app.post("/api/synthesize", async (req, res) => {
       });
     }
 
+    const { Type } = await import("@google/genai");
     const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
     const prompt = `You are a deterministic coding agent synthesis engine.
-Your task is to synthesize a robust JavaScript function based on the provided formal specification.
+Your task is to synthesize a simple program represented as JSON Intermediate Representation (IR), based on the provided specification.
 
 ${knowledgeBase && knowledgeBase.length > 0 ? `### PREVIOUSLY LEARNED AXIOMS & PATTERNS:\n${knowledgeBase}\n\n` : ''}
 ${errorTrace ? `### CORRECTION REQUIRED:\nYour previous attempt failed with the following error/trace:\n${errorTrace}\nYou MUST fix this error in your new implementation.\n\n` : ''}
@@ -41,22 +40,82 @@ ${errorTrace ? `### CORRECTION REQUIRED:\nYour previous attempt failed with the 
 ### SPECIFICATION:
 ${spec}
 
-Produce ONLY valid JavaScript code containing the function definition (an arrow function or named function). 
-Do not wrap in markdown \`\`\`javascript ... \`\`\` blocks, just output the raw code. Do not provide any explanation or wrapping text.`;
+Output ONLY the JSON IR matching the strict schema.
+Always prefer local variables, loops, arrays, and basic mathematical operations.`;
+
+    const irSchema = {
+      type: Type.OBJECT,
+      properties: {
+        functionName: { type: Type.STRING },
+        parameters: { type: Type.ARRAY, items: { type: Type.STRING } },
+        operations: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              kind: { type: Type.STRING, description: "One of: let, const, assign, if, end_if, for, end_for, push, return, expr" },
+              target: { type: Type.STRING, description: "The variable being declared or operated on (can be empty)" },
+              value: { type: Type.STRING, description: "RHS value, condition, array variable (for push), or iterables" }
+            },
+            required: ["kind", "value"]
+          }
+        }
+      },
+      required: ["functionName", "parameters", "operations"]
+    };
 
     const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
+      model: "gemini-3.1-pro-preview",
       contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: irSchema
+      }
     });
 
-    const code = response.text?.replace(/^\`\`\`(javascript|js|typescript|ts)/m, '').replace(/^\`\`\`/m, '').trim();
+    const ir = JSON.parse(response.text || "{}");
+    
+    // Phase 2: Deterministic Compiler (IR -> JS)
+    let code = `function ${ir.functionName || 'synthesized'}(${(ir.parameters || []).join(", ")}) {\n`;
+    let indent = "  ";
+    
+    for (const op of ir.operations || []) {
+       if (op.kind === "end_if" || op.kind === "end_for") {
+         indent = indent.slice(0, Math.max(0, indent.length - 2));
+       }
+       
+       switch (op.kind) {
+         case "let": code += `${indent}let ${op.target} = ${op.value};\n`; break;
+         case "const": code += `${indent}const ${op.target} = ${op.value};\n`; break;
+         case "assign": code += `${indent}${op.target} = ${op.value};\n`; break;
+         case "push": code += `${indent}${op.target}.push(${op.value});\n`; break;
+         case "if": 
+           code += `${indent}if (${op.value}) {\n`; 
+           indent += "  ";
+           break;
+         case "end_if": 
+           code += `${indent}}\n`; 
+           break;
+         case "for": 
+           code += `${indent}for (${op.value}) {\n`; 
+           indent += "  ";
+           break;
+         case "end_for": 
+           code += `${indent}}\n`; 
+           break;
+         case "return": code += `${indent}return ${op.value};\n`; break;
+         case "expr": code += `${indent}${op.value};\n`; break;
+         default: code += `${indent}// compiler ignored: ${op.kind}\n`;
+       }
+    }
+    code += `}`;
 
     res.json({
-      code: code || "function unsupported() {\n    return null;\n}",
+      code: code,
       logs: [
-        "Confirmed structured request constraints.",
-        errorTrace ? "Applied self-healing correction based on error trace." : "Generated canonical AST.",
-        "Synthesized executable JavaScript block."
+        "Phase 1: Generated Schema-constrained JSON IR.",
+        "Phase 2: Compiled IR to JavaScript deterministically.",
+        errorTrace ? "Phase Heal: Applied self-healing correction." : "Phase Init: Initial synthesis successful."
       ]
     });
   } catch (error: any) {

@@ -7,7 +7,7 @@ export interface LogEntry {
   type: LogType;
 }
 
-export type SynthesisStatus = 'idle' | 'parsing' | 'synthesizing' | 'verifying' | 'success' | 'error';
+export type SynthesisStatus = 'idle' | 'parsing' | 'compiling' | 'verifying' | 'solving' | 'success' | 'error';
 
 export interface VerifiedFunction {
   id: string;
@@ -16,4 +16,5 @@ export interface VerifiedFunction {
   code: string;
   testCases: number;
   timestamp: number;
+  hash: string;
 }
