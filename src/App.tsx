@@ -1,153 +1,229 @@
-import { useState } from 'react';
-import { Play, Code2, Database, TerminalSquare, RotateCcw, Cpu } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Play, Code2, Database, TerminalSquare, Sparkles, BrainCircuit, Activity, RefreshCw } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { LogEntry, SynthesisStatus } from './types';
+import { LogEntry, SynthesisStatus, VerifiedFunction } from './types';
 import { generateId, getCurrentTime } from './lib/utils';
-import { SpecEditor } from './components/SpecEditor';
 import { SynthesizedCode } from './components/SynthesizedCode';
 import { TerminalLog } from './components/TerminalLog';
+import { SpecBuilder } from './components/SpecBuilder';
+import { EngineVis } from './components/EngineVis';
+import { runVerification, TestCase } from './lib/agent';
+import { BusinessCrons } from './components/BusinessCrons';
+import { SelfLearning } from './components/SelfLearning';
+import { Dreaming } from './components/Dreaming';
 
-const DEFAULT_SPEC = `# function_synthesis_template.yaml
-version: 1.0
-kind: function
+// Real local storage knowledge base
+const loadKB = (): VerifiedFunction[] => {
+  try {
+    const ks = localStorage.getItem('agentKnowledgeBase');
+    return ks ? JSON.parse(ks) : [];
+  } catch { return []; }
+};
 
-# ---------- Mandatory ----------
-name: add
-parameters:
-  - name: a
-    type: int
-  - name: b
-    type: int
-return_type: int
-
-# ---------- Preconditions ----------
-requires: []
-
-# ---------- Postconditions ----------
-ensures:
-  - "result == a + b"
-
-# ---------- Side effects ----------
-modifies: []
-`;
+const saveKB = (kb: VerifiedFunction[]) => {
+  localStorage.setItem('agentKnowledgeBase', JSON.stringify(kb));
+};
 
 export default function App() {
-  const [specCode, setSpecCode] = useState(DEFAULT_SPEC);
+  const [task, setTask] = useState('Compute the Nth Fibonacci number');
+  const [rules, setRules] = useState('Use iteration (O(N) time) rather than naive recursion. Return number.');
+  const [testCases, setTestCases] = useState<TestCase[]>([
+    { id: 't1', inputs: '[0]', expected: '0' },
+    { id: 't2', inputs: '[1]', expected: '1' },
+    { id: 't3', inputs: '[10]', expected: '55' }
+  ]);
+
   const [synthesizedCode, setSynthesizedCode] = useState<string | null>(null);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [status, setStatus] = useState<SynthesisStatus>('idle');
+  
+  // Real Autonomous execution state
+  const [attemptCount, setAttemptCount] = useState(0);
+  const [lastError, setLastError] = useState<string | undefined>(undefined);
+  const maxAttempts = 3;
+
+  const [knowledgeBase, setKnowledgeBase] = useState<VerifiedFunction[]>(loadKB());
 
   const addLog = (message: string, type: LogEntry['type'] = 'info') => {
     setLogs((prev) => [...prev, { id: generateId(), timestamp: getCurrentTime(), message, type }]);
   };
 
   const handleSynthesize = async () => {
-    if (status === 'parsing' || status === 'synthesizing' || status === 'verifying') return;
+    if (status !== 'idle' && status !== 'success' && status !== 'error') return;
     
     setLogs([]);
     setSynthesizedCode(null);
+    setAttemptCount(0);
+    setLastError(undefined);
     setStatus('parsing');
-    addLog('System initialized. Starting synthesis pipeline...', 'system');
     
-    try {
-      await new Promise((r) => setTimeout(r, 400));
-      addLog('Spec Layer: Validating YAML template formulation...', 'step');
-      
-      await new Promise((r) => setTimeout(r, 600));
+    addLog('Initiating deterministic verification loop...', 'system');
+    
+    let currentAttempt = 1;
+    let success = false;
+    let currentErrorTrace = undefined;
+    
+    while (currentAttempt <= maxAttempts && !success) {
+      setAttemptCount(currentAttempt);
       setStatus('synthesizing');
-      addLog('Dispatcher: Sending specification to Gemini 2.5 Flash...', 'info');
       
-      const response = await fetch('/api/synthesize', {
-         method: 'POST',
-         headers: { 'Content-Type': 'application/json' },
-         body: JSON.stringify({ spec: specCode })
-      });
-      
-      if (!response.ok) {
-         const errorData = await response.json();
-         throw new Error(errorData.error || 'Server Synthesis Engine failed.');
-      }
+      const promptContext = `
+Task: ${task}
+Constraints: ${rules}
+Tests:
+${testCases.map(tc => `Input: ${tc.inputs} -> Expected: ${tc.expected}`).join('\n')}
+      `;
 
-      const data = await response.json();
+      addLog(`Attempt ${currentAttempt}: Generating candidate AST...`, 'step');
       
-      setStatus('verifying');
-      addLog('Synthesis Engine: Code synthesis completed...', 'step');
-      
-      await new Promise((r) => setTimeout(r, 500));
-      
-      data.logs?.forEach((msg: string) => {
-          if (msg.includes('successfully')) addLog(msg, 'success');
-          else addLog(msg, 'info');
-      });
-      
-      await new Promise((r) => setTimeout(r, 300));
-      setStatus('success');
-      addLog('Pipeline complete. Ready for new spec.', 'success');
-      
-      setSynthesizedCode(data.code);
-    } catch (e: any) {
-      setStatus('error');
-      addLog(`Synthesis Engine Error: ${e.message}`, 'error');
+      try {
+        const kbStr = knowledgeBase.map(kb => `Task: ${kb.task}\nCode:\n${kb.code}`).join('\n\n');
+        
+        const response = await fetch('/api/synthesize', {
+           method: 'POST',
+           headers: { 'Content-Type': 'application/json' },
+           body: JSON.stringify({ 
+             spec: promptContext,
+             errorTrace: currentErrorTrace,
+             knowledgeBase: currentAttempt === 1 ? kbStr : '' 
+           })
+        });
+        
+        if (!response.ok) throw new Error('Server returned an error');
+        const data = await response.json();
+        const candidateCode = data.code;
+        
+        setSynthesizedCode(candidateCode);
+        
+        setStatus('verifying');
+        addLog(`Executing local verification against ${testCases.length} assertions...`, 'step');
+        
+        if (testCases.length > 0) {
+          const verification = await runVerification(candidateCode, testCases);
+          
+          if (verification.success) {
+             success = true;
+             setStatus('success');
+             addLog(`Verification PASSED (${verification.passed}/${verification.total} cases).`, 'success');
+             
+             // Learn it!
+             const newFn: VerifiedFunction = {
+               id: generateId(),
+               name: task.slice(0, 20) + '...',
+               task,
+               code: candidateCode,
+               testCases: testCases.length,
+               timestamp: Date.now()
+             };
+             const updatedKB = [newFn, ...knowledgeBase].slice(0, 10);
+             setKnowledgeBase(updatedKB);
+             saveKB(updatedKB);
+             
+          } else {
+             currentErrorTrace = verification.errorTrace;
+             setLastError(currentErrorTrace);
+             addLog(`Verification FAILED (${verification.passed}/${verification.total} passed). Triggering self-heal.`, 'error');
+             currentAttempt++;
+             await new Promise(r => setTimeout(r, 1000));
+          }
+        } else {
+          // No test cases, just accept it
+          success = true;
+          setStatus('success');
+          addLog('Proceeding without deterministic verification (no test cases provided).', 'warning');
+        }
+        
+      } catch (e: any) {
+         setStatus('error');
+         addLog(`System Error: ${e.message}`, 'error');
+         break;
+      }
+    }
+    
+    if (!success && currentAttempt > maxAttempts) {
+       setStatus('error');
+       addLog('Max attempts reached. Deterministic lock failed.', 'error');
     }
   };
 
+  const loadFromKb = (kb: VerifiedFunction) => {
+    setTask(kb.task);
+    setRules('Loaded from memory.');
+    setSynthesizedCode(kb.code);
+    setTestCases([]);
+    setStatus('success');
+    addLog(`Restored abstraction '${kb.name}' from Case-Based Memory.`, 'system');
+  };
+
   return (
-    <div className="h-screen bg-[#09090b] text-[#fafafa] font-sans flex flex-col p-6 gap-6 selection:bg-[#fb923c]/30 overflow-hidden">
-      {/* Header */}
+    <div className="min-h-screen bg-[#000000] text-zinc-300 font-sans p-6 flex flex-col h-screen overflow-hidden">
       <header className="flex justify-between items-center border-b border-[#3f3f46] pb-4 shrink-0">
         <div className="flex items-center gap-3">
           <div className="h-8 w-8 rounded bg-[#f97316]/10 flex items-center justify-center text-[#f97316] border border-[#f97316]/20">
-            <Cpu className="w-4 h-4" />
+            <Sparkles className="w-4 h-4" />
           </div>
           <div>
-            <h1 className="font-bold text-xl text-[#fafafa] tracking-tight flex items-center gap-2">YAML to Code Synthesizer</h1>
-            <p className="text-xs text-zinc-500 font-mono mt-1">Powered by Gemini 2.5 Flash</p>
+            <h1 className="font-bold text-xl text-[#fafafa] tracking-tight flex items-center gap-2">Deterministic Verification Agent</h1>
+            <p className="text-xs text-zinc-500 mt-1">Generates, natively evaluates, and self-heals JavaScript logic.</p>
           </div>
         </div>
         
-        <div className="flex items-center gap-6">
-          <div className="flex items-center gap-4 text-xs font-mono text-[#f97316]">
-            <div className="flex items-center gap-2">
-              <span className={`h-2 w-2 rounded-full ${status === 'idle' || status === 'success' ? 'bg-[#22c55e] shadow-[0_0_8px_#22c55e]' : 'bg-[#f97316] shadow-[0_0_8px_#f97316]'}`}></span>
-              ENGINE ACTIVE
-            </div>
-          </div>
-          
+        <div className="flex items-center gap-4">
           <button
             onClick={handleSynthesize}
-            disabled={status === 'parsing' || status === 'synthesizing' || status === 'verifying'}
+            disabled={['parsing', 'synthesizing', 'verifying'].includes(status)}
             className="flex items-center gap-2 px-4 py-2 bg-[#f97316] hover:bg-[#ea580c] disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium rounded transition-colors"
           >
-            {status === 'parsing' || status === 'synthesizing' || status === 'verifying' ? (
-              <RotateCcw className="w-4 h-4 animate-spin" />
+            {['parsing', 'synthesizing', 'verifying'].includes(status) ? (
+              <RefreshCw className="w-4 h-4 animate-spin" />
             ) : (
               <Play className="w-4 h-4" />
             )}
-            Execute Pipeline
+            Run Agent Loop
           </button>
         </div>
       </header>
 
-      {/* Main Workspace - 12x12 Bento Grid */}
-      <main className="flex-1 grid grid-cols-12 grid-rows-1 gap-4 h-0 overflow-hidden">
-        {/* Left Column: Spec Editor */}
-        <div className="col-span-6 bg-[#18181b] border border-[#3f3f46] rounded-xl p-4 flex flex-col relative overflow-hidden">
-          <span className="text-[10px] uppercase tracking-[0.1em] text-[#f97316] mb-3 font-semibold flex items-center gap-2 shrink-0">
-            <Code2 className="w-3 h-3" /> 01. Spec Layer (YAML)
-          </span>
-          <div className="flex-1 overflow-hidden">
-            <SpecEditor code={specCode} onChange={setSpecCode} />
-          </div>
+      <main className="flex-1 grid grid-cols-12 gap-4 h-0 overflow-hidden mt-4">
+        
+        {/* LEFT COLUMN: Input & Engine */}
+        <div className="col-span-3 flex flex-col gap-4 overflow-hidden h-full">
+           <div className="flex-[2] bg-[#18181b] border border-[#3f3f46] rounded-xl p-4 flex flex-col relative overflow-hidden min-h-0">
+              <span className="text-[10px] uppercase tracking-[0.1em] text-[#f97316] mb-3 font-semibold flex items-center gap-2 shrink-0">
+                <Code2 className="w-3 h-3" /> 01. Spec & Assertions
+              </span>
+              <SpecBuilder 
+                task={task} setTask={setTask}
+                rules={rules} setRules={setRules}
+                testCases={testCases} setTestCases={setTestCases}
+              />
+           </div>
+           
+           <div className="flex-[1] bg-[#18181b] border border-[#3f3f46] rounded-xl p-4 flex flex-col relative overflow-hidden shrink-0">
+               <EngineVis 
+                 status={status} 
+                 attemptCount={attemptCount} 
+                 maxAttempts={maxAttempts}
+                 lastError={lastError}
+               />
+           </div>
         </div>
 
-        {/* Right Column (Split) */}
-        <div className="col-span-6 flex flex-col gap-4 overflow-hidden">
-          {/* Right Column Top: Synthesized Code */}
-          <div className="flex-1 bg-[#18181b] border border-[#3f3f46] rounded-xl p-4 flex flex-col relative overflow-hidden">
-            <span className="text-[10px] uppercase tracking-[0.1em] text-[#f97316] mb-3 font-semibold flex items-center gap-2 shrink-0">
-              <Database className="w-3 h-3" /> 02. Synthesis Output
-            </span>
-            <div className="flex-1 relative overflow-hidden">
+        {/* MIDDLE COLUMN: Verified Output & Logs */}
+        <div className="col-span-5 flex flex-col gap-4 overflow-hidden h-full">
+          <div className="flex-[3] bg-[#18181b] border border-[#3f3f46] rounded-xl p-4 flex flex-col relative overflow-hidden">
+            <div className="flex justify-between items-center border-b border-[#27272a] pb-3 mb-3 shrink-0">
+              <span className="text-sm font-semibold flex items-center gap-2">
+                <Database className="w-4 h-4 text-[#f97316]" /> Verified JavaScript Output
+              </span>
+              {status === 'success' && synthesizedCode && testCases.length > 0 && (
+                <span className="text-[10px] text-[#22c55e] font-mono bg-[#22c55e]/10 px-2 py-0.5 rounded border border-[#22c55e]/20">
+                  VERIFIED IDENTICAL
+                </span>
+              )}
+            </div>
+            
+            <div className="flex-1 relative overflow-hidden bg-[#09090b] border border-[#27272a] rounded">
               <AnimatePresence mode="wait">
                 {synthesizedCode ? (
                   <motion.div
@@ -155,7 +231,7 @@ export default function App() {
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0 }}
-                    className="h-full overflow-auto"
+                    className="h-full overflow-hidden"
                   >
                     <SynthesizedCode code={synthesizedCode} />
                   </motion.div>
@@ -165,26 +241,39 @@ export default function App() {
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
                     exit={{ opacity: 0 }}
-                    className="absolute inset-0 flex flex-col items-center justify-center text-zinc-600 font-mono text-xs select-none bg-[#09090b] rounded-md border border-[#27272a]"
+                    className="absolute inset-0 flex flex-col items-center justify-center text-zinc-600 font-mono text-xs select-none"
                   >
                     <Database className="w-8 h-8 mb-4 text-[#27272a]" />
-                    <p>Awaiting AST synthesis...</p>
-                    <p className="text-[10px] text-zinc-700 mt-2 uppercase tracking-widest px-8 text-center leading-relaxed">Execute Pipeline to run</p>
+                    <p>Awaiting valid AST...</p>
                   </motion.div>
                 )}
               </AnimatePresence>
             </div>
           </div>
 
-          {/* Right Column Bottom: Terminal */}
-          <div className="h-1/3 min-h-[150px] shrink-0 bg-[#18181b] border border-[#3f3f46] rounded-xl p-4 flex flex-col relative overflow-hidden">
-            <span className="text-[10px] uppercase tracking-[0.1em] text-[#f97316] mb-3 font-semibold flex items-center gap-2 shrink-0">
-              <TerminalSquare className="w-3 h-3" /> 03. System Logs
+          <div className="flex-[2] shrink-0 bg-[#18181b] border border-[#3f3f46] rounded-xl p-4 flex flex-col relative overflow-hidden">
+            <span className="text-sm font-semibold border-b border-[#27272a] pb-3 mb-3 flex items-center gap-2 shrink-0">
+              <TerminalSquare className="w-4 h-4 text-[#f97316]" /> Execution Trace
             </span>
-            <div className="flex-1 overflow-auto bg-[#09090b] rounded-[6px] border border-[#27272a] p-3">
+            <div className="flex-1 overflow-auto bg-[#09090b] rounded border border-[#27272a] p-3">
               <TerminalLog logs={logs} status={status} />
             </div>
           </div>
+        </div>
+        
+        {/* RIGHT COLUMN: Capabilities */}
+        <div className="col-span-4 flex flex-col gap-4 overflow-hidden h-full">
+           <div className="flex-[5] bg-[#18181b] border border-[#3f3f46] rounded-xl p-4 flex flex-col relative overflow-hidden">
+               <BusinessCrons />
+           </div>
+           
+           <div className="flex-[4] bg-[#18181b] border border-[#3f3f46] rounded-xl p-4 flex flex-col relative overflow-hidden">
+               <SelfLearning knowledgeBase={knowledgeBase} loadFromKb={loadFromKb} />
+           </div>
+
+           <div className="flex-[3] bg-[#18181b] border border-[#3f3f46] rounded-xl p-4 flex flex-col relative overflow-hidden">
+               <Dreaming />
+           </div>
         </div>
 
       </main>

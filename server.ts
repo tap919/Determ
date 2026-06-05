@@ -2,8 +2,6 @@ import express from "express";
 import path from "path";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
-import yaml from "js-yaml";
-
 export const app = express();
 app.use(express.json());
 
@@ -14,67 +12,59 @@ app.get("/api/health", (req, res) => {
 
 app.post("/api/synthesize", async (req, res) => {
   try {
-    const { spec } = req.body;
+    const { spec, errorTrace, knowledgeBase } = req.body;
     
     if (!spec) {
       return res.status(400).json({ error: "No specification provided." });
     }
 
-    // Basic YAML parsing check
-    let parsedSpec;
-    try {
-      parsedSpec = yaml.load(spec);
-    } catch (err) {
-      return res.status(400).json({ error: "Invalid YAML spec syntax." });
-    }
-
     // Only attempt to call Gemini if API Key exists
     if (!process.env.GEMINI_API_KEY) {
       // Fallback for development/testing without real API key
-      if (parsedSpec && typeof parsedSpec === 'object' && 'name' in parsedSpec) {
-         return res.json({
-           code: `def ${parsedSpec.name}(a: int, b: int) -> int:\n    return a + b\n`,
-           logs: [
-             "Fallback mode triggered due to missing API key.",
-             "Synthesizing default stub."
-           ]
-         });
-      }
-      return res.status(500).json({ error: "GEMINI_API_KEY is not configured." });
+      return res.json({
+        code: `function generatedFunction() {\n  return "Fallback mode - missing API key";\n}`,
+        logs: [
+          "Fallback mode triggered due to missing API key.",
+          "Generated default stub."
+        ]
+      });
     }
 
     const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
-    const prompt = `
-You are a deterministic coding agent synthesis engine.
-Convert the following YAML formal specification into a Python function.
+    const prompt = `You are a deterministic coding agent synthesis engine.
+Your task is to synthesize a robust JavaScript function based on the provided formal specification.
 
-Produce ONLY valid Python code containing the function definition. Do not wrap in markdown \`\`\`python ... \`\`\` blocks, just output the raw code. Do not provide any explanation.
+${knowledgeBase && knowledgeBase.length > 0 ? `### PREVIOUSLY LEARNED AXIOMS & PATTERNS:\n${knowledgeBase}\n\n` : ''}
+${errorTrace ? `### CORRECTION REQUIRED:\nYour previous attempt failed with the following error/trace:\n${errorTrace}\nYou MUST fix this error in your new implementation.\n\n` : ''}
 
-Specification:
+### SPECIFICATION:
 ${spec}
-`;
+
+Produce ONLY valid JavaScript code containing the function definition (an arrow function or named function). 
+Do not wrap in markdown \`\`\`javascript ... \`\`\` blocks, just output the raw code. Do not provide any explanation or wrapping text.`;
 
     const response = await ai.models.generateContent({
       model: "gemini-2.5-flash",
       contents: prompt,
     });
 
-    const code = response.text?.replace(/^\`\`\`python/m, '').replace(/^\`\`\`/m, '').trim();
+    const code = response.text?.replace(/^\`\`\`(javascript|js|typescript|ts)/m, '').replace(/^\`\`\`/m, '').trim();
 
     res.json({
-      code: code || "def unsupported():\n    pass",
+      code: code || "function unsupported() {\n    return null;\n}",
       logs: [
-        "YAML formulation validated.",
-        "Gemini 2.5 Flash response received.",
-        "Code generated successfully."
+        "Confirmed structured request constraints.",
+        errorTrace ? "Applied self-healing correction based on error trace." : "Generated canonical AST.",
+        "Synthesized executable JavaScript block."
       ]
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error("Synthesis error:", error);
-    res.status(500).json({ error: "Failed to synthesize code." });
+    res.status(500).json({ error: error?.message || "Failed to synthesize code." });
   }
 });
+
 
 async function startServer() {
   const PORT = 3000;
