@@ -9,12 +9,18 @@ export interface LogEntry {
 
 export type SynthesisStatus = 'idle' | 'parsing' | 'compiling' | 'verifying' | 'solving' | 'success' | 'error';
 
+export interface TestCase {
+  id: string;
+  inputs: string;
+  expected: string;
+}
+
 export interface VerifiedFunction {
   id: string;
   name: string;
   task: string;
   code: string;
-  testCases: number;
+  testCases: TestCase[];
   timestamp: number;
   hash: string;
 }

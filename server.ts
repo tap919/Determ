@@ -2,12 +2,107 @@ import express from "express";
 import path from "path";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
+import * as acorn from "acorn";
+import seedrandom from "seedrandom";
+import vm from "vm";
+import util from "util";
+
 export const app = express();
 app.use(express.json());
 
 // API routes FIRST
 app.get("/api/health", (req, res) => {
   res.json({ status: "ok" });
+});
+
+app.post("/api/verify", async (req, res) => {
+  try {
+    const { code, testCases } = req.body;
+    if (!code || !Array.isArray(testCases)) {
+      return res.status(400).json({ error: "Invalid payload" });
+    }
+
+    let ast;
+    try {
+      ast = acorn.parse(code, { ecmaVersion: 2024, sourceType: "module" });
+    } catch (err: any) {
+      return res.status(400).json({ error: `Parse error: ${err.message}` });
+    }
+
+    let fnName = null;
+    for (const node of ast.body as any[]) {
+      if (node.type === "ExportNamedDeclaration" && node.declaration && node.declaration.type === "FunctionDeclaration" && node.declaration.id) {
+        fnName = node.declaration.id.name;
+        break;
+      } else if (node.type === "FunctionDeclaration" && node.id) {
+        // Fallback for non-exported function
+        fnName = node.id.name;
+        break;
+      }
+    }
+
+    if (!fnName) {
+      return res.status(400).json({ error: "Could not identify a callable function declaration in the generated code." });
+    }
+
+    const details = [];
+    let passed = 0;
+    let errorTrace: string | undefined = undefined;
+
+    for (const tc of testCases) {
+      try {
+        const inputArgs = JSON.parse(tc.inputs);
+        const expectedVal = JSON.parse(tc.expected);
+
+        // Fresh sandbox for each test case
+        const prng = seedrandom('determ-seed');
+        const boxMath = Object.create(Math);
+        boxMath.random = () => prng();
+        
+        const sandbox: any = {
+           Math: boxMath,
+           console: { log: () => {} }, // mock console if code logs
+           inputArgs
+        };
+        const context = vm.createContext(sandbox);
+
+        // Strip export keyword to run in traditional VM context without experimental modules
+        const safeCode = code.replace(/^\s*export\s+/, '');
+
+        // Compile the code into the context
+        const script = new vm.Script(`${safeCode}\n${fnName}(...inputArgs);`);
+
+        // Run with timeout to prevent infinite loops
+        const result = script.runInContext(context, { timeout: 1000 });
+
+        if (util.isDeepStrictEqual(result, expectedVal)) {
+          passed++;
+          details.push({ id: tc.id, success: true, actual: JSON.stringify(result) });
+        } else {
+          const errStr = `Test Failed: Input: ${tc.inputs}. Expected: ${tc.expected}, but got: ${JSON.stringify(result)}`;
+          details.push({ id: tc.id, success: false, error: errStr });
+          if (!errorTrace) errorTrace = errStr;
+        }
+      } catch (e: any) {
+        let errStr = `Execution Error on Input ${tc.inputs}: ${e.message}`;
+        if (e.message.includes('Script execution timed out')) {
+          errStr = `Execution Timeout on Input ${tc.inputs}: Possible infinite loop detected.`;
+        }
+        details.push({ id: tc.id, success: false, error: errStr });
+        if (!errorTrace) errorTrace = errStr;
+      }
+    }
+
+    res.json({
+      success: passed === testCases.length && testCases.length > 0,
+      passed,
+      total: testCases.length,
+      errorTrace,
+      details
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: error?.message || "Verification failed." });
+  }
 });
 
 app.post("/api/synthesize", async (req, res) => {
@@ -73,10 +168,19 @@ Always prefer local variables, loops, arrays, and basic mathematical operations.
       }
     });
 
-    const ir = JSON.parse(response.text || "{}");
+    let ir;
+    try {
+      ir = JSON.parse(response.text || "{}");
+    } catch (e: any) {
+      return res.status(502).json({ error: `Model returned invalid JSON: ${response.text?.substring(0, 100)}` });
+    }
+
+    if (!ir.functionName || !Array.isArray(ir.operations)) {
+       return res.status(502).json({ error: 'Model returned malformed IR structure' });
+    }
     
     // Phase 2: Deterministic Compiler (IR -> JS)
-    let code = `function ${ir.functionName || 'synthesized'}(${(ir.parameters || []).join(", ")}) {\n`;
+    let code = `export function ${ir.functionName || 'synthesized'}(${(ir.parameters || []).join(", ")}) {\n`;
     let indent = "  ";
     
     for (const op of ir.operations || []) {
